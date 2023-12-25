@@ -368,6 +368,62 @@ resource "aws_iam_role_policy_attachment" "attach_policy_externaldns" {
   depends_on = [ aws_iam_role.AmazonEKSExternalDNSRole, aws_iam_policy.ExternalDNSIAMPolicy ]
 }
 
+# AWS IAM 정책 정의 - EBS 볼륨 관리
+resource "aws_iam_policy" "eks_ebs_management_policy" {
+  name        = "EKS-EBS-Management-Policy"
+  description = "Policy to allow EKS to manage EBS volumes"
+
+  policy = jsonencode({
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": [
+          "ec2:CreateVolume",
+          "ec2:DeleteVolume",
+          "ec2:AttachVolume",
+          "ec2:DetachVolume",
+          "ec2:DescribeVolumes",
+          "ec2:DescribeInstances"
+        ],
+        "Resource": "*"
+      }
+    ]
+  })
+}
+
+# AWS IAM 역할 생성 - EBS 볼륨 관리
+resource "aws_iam_role" "eks_aws_service_role" {
+  name        = "EKS-AWS-Service-Role"
+  description = "Role to allow an AWS service in EKS to access AWS resources"
+
+  assume_role_policy = jsonencode({
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "Federated": "${data.terraform_remote_state.eks_remote_data.outputs.eks_cluster_oidc_arn}"
+        },
+        "Action": "sts:AssumeRoleWithWebIdentity",
+        "Condition": {
+          "StringEquals": {
+            "${data.terraform_remote_state.eks_remote_data.outputs.eks_cluster_oidc}:aud": "sts.amazonaws.com",
+            "${data.terraform_remote_state.eks_remote_data.outputs.eks_cluster_oidc}:sub": "system:serviceaccount:monitoring:ebs-volume"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# 정책을 역할에 연결
+resource "aws_iam_role_policy_attachment" "attach_eks_ebs_policy_to_role" {
+  policy_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/EKS-EBS-Management-Policy"
+  role       = "EKS-AWS-Service-Role"
+  depends_on = [ aws_iam_policy.eks_ebs_management_policy,aws_iam_role.eks_aws_service_role]
+}
+
 # #Load-balancer-controller-sa.yml
 # resource "kubernetes_manifest" "load-balancer-controller-sa" {
 #   manifest = {
